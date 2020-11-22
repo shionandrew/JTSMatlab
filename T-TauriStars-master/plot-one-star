@@ -1,0 +1,12 @@
+set multiplot layout 3, 1 title "Multiplot layout 3, 1" font ",14"
+set tmargin 2
+set title "Plot 1"
+unset key
+plot sin(x)/x
+
+set title "Plot 2"
+unset key
+plot 'Exp2.4_Period'
+
+set title "Plot 3"
+plot 'Exp1.5_Period'
