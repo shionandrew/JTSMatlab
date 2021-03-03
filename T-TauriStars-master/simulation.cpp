@@ -12,10 +12,10 @@ using namespace std;
 #include <string>
 #include <algorithm>
 
-bool const RAND_DIST = false; // False for (testing) NO random distribution of Bfield and Mdot factor, True (normal mode) for random distribution
+bool const RAND_DIST = true; // False for (testing) NO random distribution of Bfield and Mdot factor, True (normal mode) for random distribution
 int const TotalSimulations = 1;
-static const vector<double> TIMESTEPS {0.05, 0.005}; // .005 the timestep we want
-static const vector<bool> PropellerTests = {false,true};
+static const vector<double> TIMESTEPS {0.05, 0.05}; // .005 the timestep we want
+static const vector<bool> PropellerTests = {true, true};
 
 
 /**
@@ -128,23 +128,101 @@ for(size_t bucket = 0; bucket < periodsData.size(); ++bucket){
 
 
 
-
 /**
  * \brief plot period histogram,
  *
- * \param starData struct periods1 for stars with mass < 0.25, periods2 for stars with mass > 0.25, simulationNumber (if performing multiple simulations)
+ * \param starData struct periods1 for stars with mass < 0.25, periods2 for stars with mass > 0.25
  * \returns
  */
 void plothistogram(vector<starData> periods1, vector<starData>periods2, int simulationNumber)
 {
-    stringstream folderNameStream;
-    folderNameStream << fixed << setprecision(4);
-    folderNameStream << TIMESTEPS[simulationNumber]; // OUTPUTID*simulationNumber;
-    string folderName = folderNameStream.str();
+
+    vector<double> periodbins1; // stores number of low mass stars in each period bin
+    vector<double> periodbins2; // stores number of high mass stars in each period bin
+    vector<double> bins; // vector storing lower bound of period bin at corresponding index
+    
+    // iterate from minimum period to maximum period
+    for(double i = 0; i < 20; i += 1) {
+        periodbins1.push_back(0);
+        periodbins2.push_back(0);
+        bins.push_back(i);
+    }
+    // sorting periods into bins
+    for(size_t k=0;k<periods1.size();k++) {
+        size_t binIndex = floor(periods1[k].period); // find bin star falls into (rounding down) 
+        ++periodbins1[binIndex]; // increase number of stars in this bin
+    }
+    // repeat for high mass stars
+    for(size_t k=0;k<periods2.size();k++) {
+        size_t binIndex =  floor(periods2[k].period);
+        ++periodbins2[binIndex];
+    }
+
+    // printing to files
+    FILE * temp1 = fopen("periods1.temp", "w");
+    FILE * temp2 = fopen("periods2.temp", "w");
+	FILE* gp3=popen("gnuplot -persistent","w");
+
+    for(size_t k=0;k<periodbins1.size();k++) {
+        double numPer1 = periodbins1[k]; // number of stars in bin
+        // save period at bottom of bin, N stars in bin, and error (sqrt[N])
+        fprintf(temp1,"%f %f %f \n",bins[k]+.5,numPer1,pow(numPer1,.5)); //.5 needed because of gnuplot centering...
+    }
+    for(size_t k=0;k<periodbins2.size();k++) {
+        double numPer2 = periodbins2[k];
+        fprintf(temp2,"%f %f %f \n",bins[k]+.5,numPer2,pow(numPer2,.5));
+    }
+
+	// write periods to file for gnuplot
+    //for(size_t k=0;k<periods1.size();k++) {
+    //    fprintf(temp1,"%f %x \n",periods1[k].period, pow(periods1[k].period,.5));
+    //}
+    //for(size_t k=0;k<periods2.size();k++) {
+    //    fprintf(temp2,"%f %x \n",periods2[k].period,  pow(periods2[k].period,.5));
+    //}
+	//cout << "Number of Stars: " << periods1.size()+periods2.size() << endl;
+
+    fprintf(gp3, "%s \n", "set terminal postscript eps enhanced color font 'Helvetica,10'");
+    fprintf(gp3, "%s \n", "set style histogram errorbars linewidth 1");
+    fprintf(gp3, "%s%s%s \n", "set output 'distribution", to_string(PropellerTests[simulationNumber]).c_str(), ".eps'");
+    fprintf(gp3, "%s\n", "binwidth=1");
+    fprintf(gp3, "%s\n", "set boxwidth binwidth");
+    fprintf(gp3, "%s\n", "bin(x,width)=width*floor(x/width) + binwidth/2.0");
+    fprintf(gp3, "%s%s %s \n", "set multiplot layout 2,1 title \"","Period Distribution","\"");
+    fprintf(gp3, "%s \n", "set ylabel \"Number of stars\"");
+    fprintf(gp3, "%s \n", "unset xlabel");
+    fprintf(gp3, "%s \n", "set xrange [0:14]");
+    fprintf(gp3, "%s%s %s \n", "set label 1\"","m < 0.25 solar mass","\" at graph 0.8,0.9");
+    fprintf(gp3, "%s \n", "plot 'periods1.temp' using 1:2:3 with boxerrorbars");
+    fprintf(gp3, "%s \n", "set xlabel \"Period (days)\"");
+    fprintf(gp3, "%s%s %s \n", "set label 1\"","m > 0.25 solar mass","\" at graph 0.8,0.9");
+    fprintf(gp3, "%s \n", "plot 'periods2.temp' using 1:2:3 with boxerrorbars" );
+    fprintf(gp3, "%s \n", "unset multiplot");
+
+    fclose(temp1);
+    fclose(temp2);
+    pclose(gp3);
+
+}
+
+
+
+/**
+ * \brief plot period histogram with phases of stars color coded
+ *
+ * \param starData struct periods1 for stars with mass < 0.25, periods2 for stars with mass > 0.25, simulationNumber (if performing multiple simulations)
+ * \returns
+ */
+void plothistogramWithPhase(vector<starData> periods1, vector<starData>periods2, int simulationNumber)
+{
+    //stringstream folderNameStream;
+    //folderNameStream << fixed << setprecision(4);
+    //folderNameStream << TIMESTEPS[simulationNumber]; // OUTPUTID*simulationNumber;
+    //string folderName = folderNameStream.str();
 
 	// make new folder and change directories into new folder
-    mkdir(folderName.c_str(), S_IRUSR | S_IWUSR | S_IXUSR);
-    chdir(folderName.c_str());
+    //mkdir(folderName.c_str(), S_IRUSR | S_IWUSR | S_IXUSR);
+    //chdir(folderName.c_str());
 
 	  vector<vector<starData>> periods1Data = populateBuckets(periods1, 14 ,1, simulationNumber);
 		vector<vector<starData>> periods2Data = populateBuckets(periods2, 14 ,1, simulationNumber);
@@ -223,15 +301,13 @@ void plothistogram(vector<starData> periods1, vector<starData>periods2, int simu
     fprintf(gp3, "%s%s %s \n", "set multiplot layout 2,1 title \"","Period Distribution","\"");
     fprintf(gp3, "%s \n", "set ylabel \"Number of stars\"");
     fprintf(gp3, "%s \n", "unset xlabel");
-    //fprintf(gp3, "%s \n", "set xrange [0:14]");
-    fprintf(gp3, "%s%s %s \n", "set label 1\"","m < 0.25 solar mass","\" at graph 0.8,0.9");
-    fprintf(gp3, "%s \n", "plot 'periods1.temp' using (bin($1,binwidth)):(1.0) smooth freq with boxes notitle, 'periods1_4.temp' using (bin($1,binwidth)):(1.0) smooth freq with boxes notitle");
+    fprintf(gp3, "%s \n", "set xrange [0:14]");
+    fprintf(gp3, "%s%s %s \n", "set label 1\"","m < 0.25 solar mass","\" at graph 0.6,0.9");
+    fprintf(gp3, "%s \n", "plot 'periods1.temp' using (bin($1,binwidth)):(1.0) smooth freq with boxes title 'Spin up', 'periods1_4.temp' using (bin($1,binwidth)):(1.0) smooth freq with boxes title 'Unlocked'");
     fprintf(gp3, "%s \n", "set xlabel \"Period (days)\"");
-    fprintf(gp3, "%s%s %s \n", "set label 1\"","m > 0.25 solar mass","\" at graph 0.8,0.9");
-    fprintf(gp3, "%s \n", "plot 'periods2.temp' using (bin($1,binwidth)):(1.0) smooth freq with boxes notitle, 'periods2_4.temp' using (bin($1,binwidth)):(1.0) smooth freq with boxes notitle, 'periods2_3.temp' using (bin($1,binwidth)):(1.0) smooth freq with boxes notitle, 'periods2_2.temp' using (bin($1,binwidth)):(1.0) smooth freq with boxes notitle");
+    fprintf(gp3, "%s%s %s \n", "set label 1\"","m > 0.25 solar mass","\" at graph 0.6,0.9");
+    fprintf(gp3, "%s \n", "plot 'periods2.temp' using (bin($1,binwidth)):(1.0) smooth freq with boxes title 'Spin up', 'periods2_4.temp' using (bin($1,binwidth)):(1.0) smooth freq with boxes title 'Propeller', 'periods2_3.temp' using (bin($1,binwidth)):(1.0) smooth freq with boxes title 'Locked', 'periods2_2.temp' using (bin($1,binwidth)):(1.0) smooth freq with boxes title 'Unlocked'");
     fprintf(gp3, "%s \n", "unset multiplot");
-
-	//fprintf(gp3, "%s \n", "plot 'period.temp' using (bin($1,binwidth)):(1.0) smooth freq with boxes notitle, '' using 2 title 'Col2'");
 
     fclose(temp1);
     fclose(temp1_4);
@@ -243,8 +319,7 @@ void plothistogram(vector<starData> periods1, vector<starData>periods2, int simu
     fclose(temp2_3);
     fclose(temp2_2);
     fclose(temp2_1);
-     //fclose(gp3);
-    //chdir(".."); 
+    pclose(gp3);
 
 }
 
@@ -265,10 +340,10 @@ void plotlogscalehistogram(vector<double> periods1, vector<double> periods2, int
     const char* F2 = str2.c_str();
 
 
-    FILE * temp1 = fopen("periods1loghist.temp", "w");
-    FILE * temp2 = fopen("periods2loghist.temp", "w");
-    FILE * file1 = fopen(F1, "w");
-    FILE * file2 = fopen(F2, "w");
+    //FILE * temp1 = fopen("periods1loghist.temp", "w");
+    //FILE * temp2 = fopen("periods2loghist.temp", "w");
+    FILE * temp1 = fopen(F1, "w");
+    FILE * temp2 = fopen(F2, "w");
     FILE* gp3=popen("gnuplot -persistent","w");
 
     double binsPerDecade = 10;
@@ -280,8 +355,7 @@ void plotlogscalehistogram(vector<double> periods1, vector<double> periods2, int
     
     double maxPeriod = max(*max_element(periods1.begin(), periods1.end()),
                           *max_element(periods2.begin(), periods2.end()));
-    cout << maxPeriod << endl;
-    cout << minPeriod << endl;
+
     // min and max OOM
     int minOOM = floor(log10(minPeriod));
     int maxOOM = floor(log10(maxPeriod))+1; // round down and then add 1
@@ -316,11 +390,9 @@ void plotlogscalehistogram(vector<double> periods1, vector<double> periods2, int
         // save period at bottom of bin, N stars in bin, and error (sqrt[N])
         fprintf(temp1,"%f %f %f \n",bins[k],numPer1,pow(numPer1,.5));
         fprintf(temp2,"%f %f %f \n",bins[k],numPer2,pow(numPer2,.5));
-        fprintf(file1,"%f %f %f \n",bins[k],numPer1,pow(numPer1,.5));
-        fprintf(file2,"%f %f %f \n",bins[k],numPer2,pow(numPer2,.5));
 
     }
-
+    cout << "distributionlogscale" << to_string(PropellerTests[simulationNumber]).c_str() << endl;
     fprintf(gp3, "%s \n", "set terminal postscript eps enhanced color font 'Helvetica,10'");
     fprintf(gp3, "%s%s%s \n", "set output 'distributionlogscale", to_string(PropellerTests[simulationNumber]).c_str(), ".eps'");
 
@@ -332,16 +404,17 @@ void plotlogscalehistogram(vector<double> periods1, vector<double> periods2, int
     fprintf(gp3, "%s \n", "set ylabel \"Number of stars\"");
     fprintf(gp3, "%s \n", "unset xlabel");
     fprintf(gp3, "%s%s %s \n", "set label 1\"","m < 0.25 solar mass","\" at graph 0.8,0.9");
-    fprintf(gp3, "%s \n", "plot 'periods1loghist.temp' using 1:2:3:($1*0.2) with boxerrorbars"); //adjust boxwidth on plot here ($1*0.2)
+    fprintf(gp3, "%s%s%s \n", "plot '",F1,"' using 1:2:3:($1*0.2) with boxerrorbars"); //adjust boxwidth on plot here ($1*0.2)
     fprintf(gp3, "%s \n", "set xlabel");
     fprintf(gp3, "%s \n", "set xlabel \"Period (days)\"");
     fprintf(gp3, "%s%s %s \n", "set label 1\"","m > 0.25 solar mass","\" at graph 0.8,0.9");
-    fprintf(gp3, "%s \n", "plot 'periods2loghist.temp' using 1:2:3:($1*0.2) with boxerrorbars"); //adjust boxwidth on plot here
+    fprintf(gp3, "%s%s%s \n", "plot '",F2,"' using 1:2:3:($1*0.2) with boxerrorbars"); //adjust boxwidth on plot here
     fprintf(gp3, "%s \n", "unset multiplot");
+    cout << "PLOTTING GRAPH" << endl;
     fclose(temp1);
     fclose(temp2);
-    fclose(file1);
-    fclose(file2);
+    pclose(gp3);
+
 }
 
 
@@ -354,16 +427,8 @@ void plotlogscalehistogram(vector<double> periods1, vector<double> periods2, int
  * gnuplot commands largely based on this:
  * https://stackoverflow.com/questions/24207850/gnuplot-histogram-x-logscale
  */
- void plotlogscalehistogramWithPhase(vector<starData> periods1, vector<starData>periods2, double simulationNumber)
+ void plotlogscalehistogramWithPhase(vector<starData> periods1, vector<starData>periods2)
 {
-    stringstream folderNameStream;
-    folderNameStream << fixed << setprecision(4);
-    folderNameStream << TIMESTEPS[simulationNumber]; //OUTPUTID*simulationNumber;
-    string folderName = folderNameStream.str();
-
-	// make new folder and change directories into new folder
-    mkdir(folderName.c_str(), S_IRUSR | S_IWUSR | S_IXUSR);
-    chdir(folderName.c_str());
 
 	// sort stars by phase
 	vector<starData> periods1_4 = sortPhase(periods1, 4);
@@ -528,7 +593,7 @@ void plotlogscalehistogram(vector<double> periods1, vector<double> periods2, int
   fclose(temp1_unlocked);
   fclose(temp2_locked);
   fclose(temp2_unlocked);
-  //fclose(gp3);
+  pclose(gp3);
   chdir(".."); 
 
 }
@@ -542,14 +607,7 @@ void plotlogscalehistogram(vector<double> periods1, vector<double> periods2, int
  */
 void plotPropellerStrengthhistogram(vector<double> PropellerStrengths1, vector<double> PropellerStrengths2, int simulationNumber)
 {
-    stringstream folderNameStream;
-    folderNameStream << fixed << setprecision(4);
-    folderNameStream << TIMESTEPS[simulationNumber]; // OUTPUTID*simulationNumber;
-    string folderName = folderNameStream.str();
 
-	// make new folder and change directories into new folder
-    mkdir(folderName.c_str(), S_IRUSR | S_IWUSR | S_IXUSR);
-    chdir(folderName.c_str());
 
     FILE * temp1 = fopen("propellerStrengths1.temp", "w");
     FILE * temp2 = fopen("propellerStrengths2.temp", "w");
@@ -573,7 +631,7 @@ void plotPropellerStrengthhistogram(vector<double> PropellerStrengths1, vector<d
     fprintf(gp3, "%s%s %s \n", "set multiplot layout 2,1 title \"","Propeller Strength Distribution","\"");
     fprintf(gp3, "%s \n", "set ylabel \"Number of stars\"");
     fprintf(gp3, "%s \n", "unset xlabel");
-    fprintf(gp3, "%s \n", "set xrange [0:100]");
+    fprintf(gp3, "%s \n", "set xrange [0:50]");
     fprintf(gp3, "%s%s %s \n", "set label 1\"","m < 0.25 solar mass","\" at graph 0.8,0.9");
     fprintf(gp3, "%s \n", "plot 'propellerStrengths1.temp' using (bin($1,binwidth)):(1.0) smooth freq with boxes notitle");
     fprintf(gp3, "%s \n", "set xlabel \"PropellerStrength (v_s_t_a_r / v_d_i_s_k)\"");
@@ -582,10 +640,64 @@ void plotPropellerStrengthhistogram(vector<double> PropellerStrengths1, vector<d
     fprintf(gp3, "%s \n", "unset multiplot");
 
     fclose(temp1);
-    chdir(".."); 
+    fclose(temp2);
+    pclose(gp3);
 }
 
+/**
+ * \brief read cmk data file, Kunitomo data file
+ *
+ * \param fname      string representing the cmk data filename
+ * \returns          a vector of vectors of doubles
+ */
+vector<vector<double>> readKunitomo()
+{
+	ifstream inputFile("KunitomoData.txt");
+	if (!inputFile.good()) {
+        throw invalid_argument( "Couldn't open cmk file for reading" );
+    }
 
+    // throw the first line
+    string line;
+    getline(inputFile, line);
+
+    // allocate space on the heap to store the cmk data as a vector of vectors of doubles
+    vector<vector<double>> cmktable;
+
+    vector<double> cmkmasses;
+    vector<double> cmkages;
+    vector<double> cmkradii;
+    vector<double> cmkxi;
+
+    double mass; // Mass in M_sun
+    double radius; 
+    double age; // age in Myrs
+    double xi; 
+
+    // read one line at a time
+    while (getline(inputFile, line)){
+    	stringstream lineStream(line);
+        // read the four doubles separated by spaces
+        // and put them in the corresponding vector
+        lineStream >> mass;
+        lineStream >> age;
+        lineStream >> radius;
+        lineStream >> xi;
+        cmkmasses.push_back(mass);
+        cmkages.push_back(age);
+        cmkradii.push_back(radius);
+        cmkxi.push_back(xi);
+        //cout << mass << " " << age << " " << radius << endl;
+    }
+    // store mass, age, radius vectors in cmktable
+    cmktable.push_back(cmkmasses);
+    cmktable.push_back(cmkages);
+    cmktable.push_back(cmkradii);
+    cmktable.push_back(cmkxi);
+    // close file
+    inputFile.close();
+    return cmktable;
+}
 
 
 /**
@@ -612,6 +724,7 @@ vector<vector<double>> readcmk(string fname)
     vector<double> cmkmasses;
     vector<double> cmkages;
     vector<double> cmkradii;
+    vector<double> cmkxi;
 
     const double PI = 3.141592653589793;
     const double SIGMAB = 5.67e-5;   // stefan-boltzmann constatn in erg/K^4 cm^2 s
@@ -644,16 +757,20 @@ vector<vector<double>> readcmk(string fname)
         cmkmasses.push_back(mass);
         cmkages.push_back(age);
         cmkradii.push_back(radius);
+        cmkxi.push_back(0.5);
+        //cout << mass << " " << age << " " << radius << endl;
     }
     // store mass, age, radius vectors in cmktable
     cmktable.push_back(cmkmasses);
     cmktable.push_back(cmkages);
     cmktable.push_back(cmkradii);
-
+    cmktable.push_back(cmkxi);
     // close file
     inputFile.close();
     return cmktable;
 }
+
+
 
 /**
  * \brief read cluster mass and age file
@@ -854,17 +971,43 @@ void plotdistribution()
     // skip the first line
     getline(infile, line);
     double period, mass, disgard;
-    vector<double> periods1, periods2;
+    FILE * temp1 = fopen("ONC_periods1.temp", "w");
+	FILE * temp2 = fopen("ONC_periods2.temp", "w");
+	FILE * gp3=popen("gnuplot -persistent","w");
+
+	// write periods to file for gnuplot
     while (infile >> disgard >> period >> disgard >> disgard >> mass >> disgard) {
+        //cout << period << endl;
         if (period > 0.001) {
             if (mass < 0.25) {
-                periods1.push_back(period);
+                fprintf(temp1,"%f \n",period);
             } else {
-                periods2.push_back(period);
+                fprintf(temp2,"%f \n",period);
             }
         }
     }
     // plot
+    fprintf(gp3, "%s \n", "set terminal postscript eps enhanced color font 'Helvetica,10'");
+    fprintf(gp3, "%s \n", "set output 'ONC_observed_distribution.eps'");
+    fprintf(gp3, "%s\n", "binwidth=1");
+    fprintf(gp3, "%s\n", "set boxwidth binwidth");
+    fprintf(gp3, "%s\n", "bin(x,width)=width*floor(x/width) + binwidth/2.0");
+    fprintf(gp3, "%s%s %s \n", "set multiplot layout 2,1 title \"","Period Distribution","\"");
+    fprintf(gp3, "%s \n", "set ylabel \"Number of stars\""); 
+    fprintf(gp3, "%s \n", "unset xlabel");
+    fprintf(gp3, "%s \n", "set xrange [0:14]");
+    fprintf(gp3, "%s%s %s \n", "set label 1\"","m < 0.25 solar mass","\" at graph 0.8,0.9"); 
+    fprintf(gp3, "%s \n", "plot 'ONC_periods1.temp' using (bin($1,binwidth)):(1.0) smooth freq with boxes notitle");
+    fprintf(gp3, "%s \n", "set xlabel");
+    fprintf(gp3, "%s \n", "set xlabel \"Period (days)\"");
+    fprintf(gp3, "%s%s %s \n", "set label 1\"","m > 0.25 solar mass","\" at graph 0.8,0.9");
+    fprintf(gp3, "%s \n", "plot 'ONC_periods2.temp' using (bin($1,binwidth)):(1.0) smooth freq with boxes notitle");
+    fprintf(gp3, "%s \n", "unset multiplot");
+
+    fclose(temp1);
+    fclose(temp2);
+    pclose(gp3);
+
 }
 
 /**
@@ -879,8 +1022,13 @@ void simulation(vector<vector<double>> simstartable, int simulationNumber)
     //cout<< "TIMESTEP: " << timestep<<endl;
     
     // compute cmk table
-    vector<vector<double>> cmktable = readcmk("cmkdata.txt");
-
+    vector<vector<double>> cmktable = readcmk("cmkdata.txt"); //cmkdata.txt");
+    //vector<vector<double>> cmktable;
+    if(PropellerTests[simulationNumber]==true) {
+        //cmktable = readKunitomo();
+        cmktable = readcmk("cmkdata.txt");
+        cout << "Kunitomo" << endl;
+        }
     // random number generator
     default_random_engine genm;
     default_random_engine genb; 
@@ -926,40 +1074,44 @@ void simulation(vector<vector<double>> simstartable, int simulationNumber)
                 bfieldstrength = 1.67;
                 logmdotfactor = 0.0;
             }
-            TTauriStar star = TTauriStar(cmktable, mass, age, pow(10,logmdotfactor), bfieldstrength, timestep, PropellerTests[repeat]);            
+            TTauriStar star = TTauriStar(cmktable, mass, age, pow(10,logmdotfactor), bfieldstrength, timestep, PropellerTests[simulationNumber]);                        
             vector<double> dataVector = star.update();
 
-            double propellerStrength = star.propellerStrength_;
-            
-            starData currentStar;
-		    currentStar.period = dataVector.at(0);
-			currentStar.phase = dataVector.at(1);
-
-			double period = currentStar.period;
-            if(period > 30){
-                cout << mass << " " << age << "" << period << endl;
-            }
-		    // write to file
-		    fprintf(datafile,"%f        %f        %f        %f        %f \n",mass,age,period, logmdotfactor,bfieldstrength);
-		        
-            // Check if final period is greater than Keplerian period
-            vector<double> kepler = star.getvector(12);
-            double keplerianPeriod = kepler.back();
-            
-            if (keplerianPeriod > period) {
-                fprintf(datafile2,"%f        %f        %f        %f        %f         %f \n",mass,age,period,logmdotfactor,bfieldstrength,keplerianPeriod);
-            }
-            if (mass < 0.25) {
-                periods1_phase.push_back(currentStar);
-                periods1.push_back(period);
-                propellerStrengths1.push_back(propellerStrength);
+            if (!dataVector.empty()) {
+                double propellerStrength = star.propeller_strength;
                 
-            } else {
-                 periods2_phase.push_back(currentStar);
-                 periods2.push_back(period);
-                propellerStrengths2.push_back(propellerStrength);
+                starData currentStar;
+                currentStar.period = dataVector.at(0);
+                currentStar.phase = dataVector.at(1);
 
+                double period = currentStar.period;
+                //if(period > 30){
+                    //cout << "mass: " << mass << "age: " << age << "period: " << period << endl;
+                //}
+                // write to file
+                fprintf(datafile,"%f        %f        %f        %f        %f \n",mass,age,period, logmdotfactor,bfieldstrength);
+                    
+                // Check if final period is greater than Keplerian period
+                vector<double> kepler = star.getvector(12);
+                double keplerianPeriod = kepler.back();
+                
+                if (keplerianPeriod > period) {
+                    ++numFasterThanKeplerian;
+                    fprintf(datafile2,"%f        %f        %f        %f        %f         %f \n",mass,age,period,logmdotfactor,bfieldstrength,keplerianPeriod);
+                }
+                if (mass < 0.25) {
+                    periods1_phase.push_back(currentStar);
+                    periods1.push_back(period);
+                    propellerStrengths1.push_back(propellerStrength);
+                    
+                } else {
+                    periods2_phase.push_back(currentStar);
+                    periods2.push_back(period);
+                    propellerStrengths2.push_back(propellerStrength);
+
+                }
             }
+            
 		}
 	}
 
@@ -969,10 +1121,10 @@ void simulation(vector<vector<double>> simstartable, int simulationNumber)
     cout<<"the program takes "<< duration << " s" << endl;
     cout << "there are " << numFasterThanKeplerian << " stars with periods shorter than break-up period" << endl;
     // plot
-	//plothistogram(periods1_phase, periods2_phase, simulationNumber);
+	plothistogram(periods1_phase, periods2_phase, simulationNumber);
     plotlogscalehistogram(periods1, periods2, simulationNumber);
-    // plotPropellerStrengthhistogram(propellerStrengths1, propellerStrengths2, simulationNumber);
-    //plotlogscalehistogramWithPhase(periods1_phase, periods1_phase, simulationNumber);
+    //plotPropellerStrengthhistogram(propellerStrengths1, propellerStrengths2, simulationNumber);
+    //plotlogscalehistogramWithPhase(periods1_phase, periods1_phase);
 }
 
 
@@ -982,7 +1134,7 @@ void simulation(vector<vector<double>> simstartable, int simulationNumber)
  */
 int main()
 {
-		// choose cluster simulation of single-star simulation
+    // choose cluster simulation of single-star simulation
     size_t typeofsimulation;
     cout << "Type 1 for single-star simulation, type 2 for cluster simulation" << endl;
     cin >> typeofsimulation;
@@ -1002,24 +1154,31 @@ int main()
         cout << "The age is " << age << endl;
 
         // compute cmk table
-        vector<vector<double>> cmktable = readcmk("cmkdata.txt");
+        //vector<vector<double>> cmktable = readcmk("cmkdata.txt"); //cmkdata.txt");
         
         // if performing multiple simulations, iterate
         for(int simulationNumber = 0; simulationNumber < TotalSimulations; ++simulationNumber) {
-
-            for(int i = 0; i < 2; ++i){
+            vector<vector<double>> cmktable;
+            if(PropellerTests[simulationNumber]==true) {
+                //cmktable = readKunitomo();
+                cmktable = readcmk("cmkdata.txt");
+            }
+            else {
+                cmktable = readcmk("cmkdata.txt"); //cmkdata.txt");
+            }
+            //for(int i = 0; i < 1; ++i){
                 // Saving plots to folder
                 stringstream folderNameStream0;
                 folderNameStream0 << fixed << setprecision(2);
                 //folderNameStream0 << "Star: Mass_" << mass << "_" << TIMESTEPS[simulationNumber];
-                folderNameStream0 << "Star: Mass_" << mass << " Age_ " << age << "TF_" << i;
+                folderNameStream0 << "Star: Mass_" << mass << " Age_ " << age << "TF_" << PropellerTests[simulationNumber];
                 string folderName0 = folderNameStream0.str();
                 // make new folder and change directories into new folder
                 mkdir(folderName0.c_str(), S_IRUSR | S_IWUSR | S_IXUSR);
                 chdir(folderName0.c_str());
                 // create a star with magnetic field of 1.67kG
-                double timestep = TIMESTEPS[simulationNumber]; //simulationNumber*OUTPUTID;
-                TTauriStar star = TTauriStar(cmktable, mass, age, 1, 1.67, timestep, PropellerTests[i]);
+                double timestep = .1*TIMESTEPS[simulationNumber]; //simulationNumber*OUTPUTID;
+                TTauriStar star = TTauriStar(cmktable, mass, age, 1, 1.67, timestep, PropellerTests[simulationNumber]);
                 star.update();
                 // Plot all of the star's parameters as a function of time
                 int TIME_INDEX = 1;
@@ -1029,7 +1188,7 @@ int main()
                 }
                 // star.plot(2, 5);
                 chdir(".."); 
-            }
+            //}
         }
 
 

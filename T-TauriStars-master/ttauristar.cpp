@@ -14,16 +14,17 @@
 #include <vector>
 #include <algorithm>
 #include <random>
-
+#include <string>
+#include <math.h>
 using namespace std;
 
-double const TIMESTEP = 0.001;       /// timestep (Myrs) fraction of age
+//double const TIMESTEP = 0.001;       /// timestep (Myrs) fraction of age
 double const ALPHA = 0.01;           /// viscocity parameter
 double const BETA = 1.35;            /// R_M/R_A
 double const GAMMA = 1.0;            /// R_C/R_M
 double const SHAPEFACTOR = 0.17;     /// f in the rotational inertia I=fMR^2
 double const PROPEFF = 0.3;          /// propeller coefficient
-double const CRITICALDENSITYCOEFF = 1.2e22;  /// Adjustable parameter "A" (T^1/2*cm^-1/2) used to determine critical density
+double const CRITICALDENSITYCOEFF = 1.2e21;  /// Adjustable parameter "A" (T^1/2*cm^-1/2) used to determine critical density
 double const PROPSTARTTIME = 0.05;   /// B-field turn-on time (Mrs); simulation starts at this time
 //double const TURNONTIME = 0.049;      /// should be the same as above
 //double const PROPTIMESPREAD = 0.002; /// introduce randomness for PROPSTARTTIME
@@ -33,8 +34,11 @@ double const DEFAULTAGE = 1; 		/// default age of 1 million (for when user input
 double const MAXITERATIONS = 50; // maximum number of iterations
 double const GRAMS_TO_SOLAR_MASS = 5.02785*pow(10,-34); // conversion factor from grams to solar mass
 double const SECONDS_TO_MYR = 3.17098*pow(10,-14); // conversion factor from seconds to Myr
+double const DAYS_TO_MYR = 1./(365*pow(10,6)); // conversion factor from days to Myr
 double const CM_TO_SOLAR_RADIUS = 1.437*pow(10,-11); // conversion factor from cm to solar radius
-double const G = 2937.5; // G in units of (solar radius^3)/(day^2 solarmass)
+double const G = 3.91748*pow(10,20); // G in units of (solar radius^3)/(Myr^2 solarmass)
+double const KGAUSS_TO_SOLAR = 186.539*pow(10,3); // conversion from gauss to (solarMass)^.5 (Myr)^-1 (solar radius)^-.5
+double const UPPERMASSLIMIT = 1; // upper mass limit used in tracks modeling radial evolution
 
 TTauriStar::TTauriStar(vector<vector<double>> cmktable,
 	double mass, double age, double massdotfactor, double bfieldstrength, double timestep, bool Romanova)
@@ -47,13 +51,13 @@ TTauriStar::TTauriStar(vector<vector<double>> cmktable,
 			age_ = DEFAULTAGE;
 	}
 	// initialize validity of mass
-	if (mass > 3) {
+	if (mass > UPPERMASSLIMIT) {
 		valid_ = false;
 	} else {
 		valid_ = true;
 	}
 	timestep_ = timestep;
-
+	propeller_strength = 0;
 	//random_device rd1;  //Will be used to obtain a seed for the random number engine
 	//mt19937 genp(rd1()); //Standard mersenne_twister_engine seeded with rd(
 	//uniform_real_distribution<double> proptimeDist(0.048,0.052);
@@ -65,7 +69,7 @@ TTauriStar::TTauriStar(vector<vector<double>> cmktable,
 	propendtime_ = propstarttime_;
 
   // assuming accretion is on at start
-	acceff_ = 0;
+	acceff_ = 1;
 
 	// save initial values of age and acceff in the corresponding vectors
 	// go backwards in time
@@ -91,7 +95,11 @@ double TTauriStar::calculatemassdot()
 {
 	// calculate current value of Mdot in unts M_sun/yr
 	// massdotfactor mimics scatter
-		return 7.0e-8*massdotfactor_*pow(age_,ACCPOWER)*pow(mass_,2.4);
+	if(age_ > 0.001){
+		return 7.0e-8*massdotfactor_*pow(age_,ACCPOWER)*pow(mass_,2.4);}
+	else{
+		/// FIX THIS
+		return 7.0e-8*massdotfactor_*pow(timestep_/10,ACCPOWER)*pow(mass_,2.4);}
 }
 
 double TTauriStar::calculateradius()
@@ -99,16 +107,28 @@ double TTauriStar::calculateradius()
 
 	size_t index1 = 0; // natural number data type
 	size_t index3 = 0;
-
+	double breakupSpeed = 0.1159*pow(radius_,3./2.)*pow(mass_,-1./2.);
+	double xi = .5*(1-pow(breakupSpeed,2)*pow(period_,-2));
+	vector<double> xis = {0.0,0.05,0.1,0.5};
+	double diff = 1;
+	double nearestxi = 0.0;
+	for(size_t i = 0; i < xis.size(); ++i) {
+		double x = xis[i];
+		if(abs(x-xi)<diff) {
+			nearestxi = x;
+		}
+	}
+	nearestxi = 0.5;
 	// find masslower and massupper such that masslower <= mass < massupper
 	double masslower = cmktable_[0][0]; // [column][row], column = 0 is mass, 1 is age, 2 is radius
 	double massupper = cmktable_[0][0];
 	while (cmktable_[0][index3] <= mass_) {
-	    if (cmktable_[0][index3] > masslower) {
+	    if (cmktable_[0][index3] > masslower && cmktable_[3][index3]==nearestxi) {
         	index1 = index3;
         	masslower = cmktable_[0][index3];
             }
 	    ++index3;
+
 	}
 	// At this point index1 is the first row # of the masslower block.
 	// and index3 is the first row # of the massupper block.
@@ -119,7 +139,7 @@ double TTauriStar::calculateradius()
 	double ageupper1 = cmktable_[1][index1];
 	size_t index2 = index1;
 
-	while (cmktable_[1][index2] <= age_) {
+	while (cmktable_[1][index2] <= age_ && cmktable_[3][index2]==nearestxi) {
 		++index2;
 	}
 	index1 = index2 - 1;
@@ -130,7 +150,7 @@ double TTauriStar::calculateradius()
 	double agelower2 = cmktable_[1][index3];
 	double ageupper2 = cmktable_[1][index3];
 	size_t index4 = index3;
-	while (cmktable_[1][index4] <= age_) {
+	while (cmktable_[1][index4] <= age_ && cmktable_[3][index4]==nearestxi) {
 		++index4;
 	}
 	index3 = index4 - 1;
@@ -146,6 +166,162 @@ double TTauriStar::calculateradius()
 	// return the interpolated radius
 	return coeff1*cmktable_[2][index1]+coeff2*cmktable_[2][index2]+coeff3*cmktable_[2][index3]+coeff4*cmktable_[2][index4];
 }
+/*
+
+double TTauriStar::calculateradius()
+{
+	double breakupSpeed = 0.1159*pow(radius_,3./2.)*pow(mass_,-1./2.);
+	double xi = .5*(1-pow(breakupSpeed,2)*pow(period_,-2));
+	// find xilower and xiupper such that xilower <= xi < xiupper
+	if(isnan(xi)){
+		xi = 0.4;
+	}
+	double xilower = cmktable_[3][0]; // [column][row], column = 0 is mass, 1 is age, 2 is radius
+	double xiupper = cmktable_[3][0];
+	size_t index_xi_upper=0;
+	size_t index_xi_lower=0;
+	while (cmktable_[3][index_xi_upper] <= xi && index_xi_upper < cmktable_[3].size()) {
+	    if (cmktable_[3][index_xi_upper] > xilower) {
+        	index_xi_lower = index_xi_upper;
+        	xilower = cmktable_[3][index_xi_lower];
+            }
+	    ++index_xi_upper;
+
+	}
+	// At this point index_xi_lower is the first row # of the xilower block.
+	// and index_xi_upper is the first row # of the xiupper block.
+	xiupper = cmktable_[3][index_xi_upper];
+
+	size_t index_masslower1 = index_xi_lower; 
+	size_t index_massupper1 = index_xi_lower;
+	// for xilower, find masslower1 and massupper1 such that masslower1 <= mass < massupper1
+	double masslower1 = cmktable_[0][index_xi_lower]; // [column][row], column = 0 is mass, 1 is age, 2 is radius, 3 is xi
+	double massupper1 = cmktable_[0][index_xi_lower];
+	while (cmktable_[0][index_massupper1] <= mass0_) {
+	    if (cmktable_[0][index_massupper1] > masslower1) {
+        	index_masslower1 = index_massupper1;
+        	masslower1 = cmktable_[0][index_masslower1];
+            }
+	    ++index_massupper1;
+
+	}
+	// At this point index_masslower1 is the first row # of the masslower block.
+	// and index_massupper1 is the first row # of the massupper block.
+	massupper1 = cmktable_[0][index_massupper1];
+	//repeat but for second xi block
+	size_t index_masslower2 = index_xi_upper; 
+	size_t index_massupper2 = index_xi_upper;
+	// for xiupper, find masslower1 and massupper1 such that masslower1 <= mass < massupper1
+	double masslower2 = cmktable_[0][index_xi_upper]; // [column][row], column = 0 is mass, 1 is age, 2 is radius, 3 is xi
+	double massupper2 = cmktable_[0][index_xi_upper];
+	while (cmktable_[0][index_massupper2] <= mass0_) {
+	    if (cmktable_[0][index_massupper2] > masslower2) {
+        	index_masslower2 = index_massupper2;
+        	masslower2 = cmktable_[0][index_masslower2];
+            }
+	    ++index_massupper2;
+
+	}
+	massupper2 = cmktable_[0][index_massupper2];
+
+	// find agelower1_1 and ageupper1_1 such that agelower1_1 <= age < ageupper1_1 (with xilower)
+	double agelower1_1 = cmktable_[1][index_masslower1];
+	double ageupper1_1 = cmktable_[1][index_masslower1];
+	size_t index_ageupper1_1 = index_masslower1;
+
+	while (cmktable_[1][index_ageupper1_1] <= age_) {
+		++index_ageupper1_1;
+	}
+	size_t index_agelower1_1 = index_ageupper1_1 - 1;
+	agelower1_1 = cmktable_[1][index_agelower1_1];
+	ageupper1_1 = cmktable_[1][index_ageupper1_1];
+
+	// find agelower2 and ageupper2 such that agelower2 <= age < ageupper2 (with xilower)
+	double agelower2_1 = cmktable_[1][index_massupper1];
+	double ageupper2_1 = cmktable_[1][index_massupper1];
+	size_t index_ageupper2_1 = index_massupper1;
+	while (cmktable_[1][index_ageupper2_1] <= age_) {
+		++index_ageupper2_1;
+	}
+	size_t index_agelower2_1 = index_ageupper2_1 - 1;
+	agelower2_1 = cmktable_[1][index_agelower2_1];
+	ageupper2_1 = cmktable_[1][index_ageupper2_1];
+
+	// find agelower1_2 and ageupper1_2 such that agelower1_2 <= age < ageupper1_2 (with xiupper)
+	double agelower1_2 = cmktable_[1][index_masslower2];
+	double ageupper1_2 = cmktable_[1][index_masslower2];
+	size_t index_ageupper1_2 = index_masslower2;
+
+	while (cmktable_[1][index_ageupper1_2] <= age_) {
+		++index_ageupper1_2;
+	}
+	size_t index_agelower1_2 = index_ageupper1_2 - 1;
+	agelower1_2 = cmktable_[1][index_agelower1_2];
+	ageupper1_2 = cmktable_[1][index_ageupper1_2];
+
+	// find agelower2_2 and ageupper2_2 such that agelower2_2 <= age < ageupper2_2 (with xiupper)
+	double agelower2_2 = cmktable_[1][index_massupper2];
+	double ageupper2_2 = cmktable_[1][index_massupper2];
+	size_t index_ageupper2_2 = index_massupper2;
+	while (cmktable_[1][index_ageupper2_2] <= age_) {
+		++index_ageupper2_2;
+	}
+	size_t index_agelower2_2 = index_ageupper2_2 - 1;
+	agelower2_2 = cmktable_[1][index_agelower2_2];
+	ageupper2_2 = cmktable_[1][index_ageupper2_2];
+
+
+	// eight coefficients
+	double coeff1 = (xiupper-xi)*(massupper1-mass_)*(ageupper1_1-age_)/(massupper1-masslower1)/(ageupper1_1-agelower1_1)/(xiupper-xilower);
+	double coeff2 = (xiupper-xi)*(massupper1-mass_)*(age_-agelower1_1)/(massupper1-masslower1)/(ageupper1_1-agelower1_1)/(xiupper-xilower);
+	double coeff3 = (xiupper-xi)*(mass_-masslower1)*(ageupper2_1-age_)/(massupper1-masslower1)/(ageupper2_1-agelower2_1)/(xiupper-xilower);
+	double coeff4 = (xiupper-xi)*(mass_-masslower1)*(age_-agelower2_1)/(massupper1-masslower1)/(ageupper2_1-ageupper2_1)/(xiupper-xilower);
+
+	double coeff5 = (xi-xilower)*(massupper2-mass_)*(ageupper1_2-age_)/(massupper2-masslower2)/(ageupper1_2-agelower1_2)/(xiupper-xilower);
+	double coeff6 = (xi-xilower)*(massupper2-mass_)*(age_-agelower1_2)/(massupper2-masslower2)/(ageupper1_2-agelower1_2)/(xiupper-xilower);
+	double coeff7 = (xi-xilower)*(mass_-masslower2)*(ageupper2_2-age_)/(massupper2-masslower2)/(ageupper2_2-agelower2_2)/(xiupper-xilower);
+	double coeff8 = (xi-xilower)*(mass_-masslower2)*(age_-agelower2_2)/(massupper2-masslower2)/(ageupper2_2-ageupper2_2)/(xiupper-xilower);
+
+	if(mass_-masslower1 == 0) {
+		coeff3 = 0;
+		coeff4 = 0;
+	}
+	if(massupper1-mass_==0){
+		coeff1 = 0;
+		coeff2 = 0;
+	}
+
+	if(mass_-masslower2 == 0) {
+		coeff7 = 0;
+		coeff8 = 0;
+	
+	}
+	if(massupper2-mass_==0){
+		coeff5 = 0;
+		coeff6 = 0;
+	}
+
+	if (xiupper-xilower==0){
+		xi = .5;
+		xiupper = 1;
+		xilower = 0;
+		coeff1 = (xiupper-xi)*(massupper1-mass_)*(ageupper1_1-age_)/(massupper1-masslower1)/(ageupper1_1-agelower1_1)/(xiupper-xilower);
+		coeff2 = (xiupper-xi)*(massupper1-mass_)*(age_-agelower1_1)/(massupper1-masslower1)/(ageupper1_1-agelower1_1)/(xiupper-xilower);
+		coeff3 = (xiupper-xi)*(mass_-masslower1)*(ageupper2_1-age_)/(massupper1-masslower1)/(ageupper2_1-agelower2_1)/(xiupper-xilower);
+		coeff4 = (xiupper-xi)*(mass_-masslower1)*(age_-agelower2_1)/(massupper1-masslower1)/(ageupper2_1-ageupper2_1)/(xiupper-xilower);
+
+		coeff5 = (xi-xilower)*(massupper2-mass_)*(ageupper1_2-age_)/(massupper2-masslower2)/(ageupper1_2-agelower1_2)/(xiupper-xilower);
+		coeff6 = (xi-xilower)*(massupper2-mass_)*(age_-agelower1_2)/(massupper2-masslower2)/(ageupper1_2-agelower1_2)/(xiupper-xilower);
+		coeff7 = (xi-xilower)*(mass_-masslower2)*(ageupper2_2-age_)/(massupper2-masslower2)/(ageupper2_2-agelower2_2)/(xiupper-xilower);
+		coeff8 = (xi-xilower)*(mass_-masslower2)*(age_-agelower2_2)/(massupper2-masslower2)/(ageupper2_2-ageupper2_2)/(xiupper-xilower);
+	
+	}
+
+	// return the interpolated radius
+	return coeff1*cmktable_[2][index_agelower1_1]+coeff2*cmktable_[2][index_ageupper1_1]+coeff3*cmktable_[2][index_agelower2_1]+coeff4*cmktable_[2][index_ageupper2_1]
+			+ coeff5*cmktable_[2][index_agelower1_2]+coeff6*cmktable_[2][index_ageupper1_2]+coeff7*cmktable_[2][index_agelower2_2]+coeff8*cmktable_[2][index_ageupper2_2];
+}
+*/
 
 double TTauriStar::calculatebfield()
 {
@@ -243,8 +419,8 @@ void TTauriStar::calculateperiods()
 	for (size_t i = 0; i < ages_.size(); ++i) {
 		// retrieve mass and age stored in vectors
 		mass_ = masses_[i];
-		// cannot handle mass > 3 solar mass
-		if (mass_ > 3) {
+		// cannot handle mass > UPPERMASSLIMIT
+		if (mass_ > UPPERMASSLIMIT) {
 			valid_ = false;
 			break;
 		}
@@ -258,7 +434,7 @@ void TTauriStar::calculateperiods()
 		rm_ = calculaterm();
 		diskdensity_ = calculatediskdensity();
 		radiusdot_ = (radius_-radius)/timestep_;
-
+		//radiusdot_ = 0;
 		// calculate the Keplerian period at rm
 		periodrm_ = 0.1159*pow(rm_,3./2.)*pow(mass_,-1./2.);
 
@@ -271,51 +447,49 @@ void TTauriStar::calculateperiods()
 	    	period_ = 0.1159*pow(radius_,3./2.)*pow(mass_,-1./2.);
 	    	// assume accretion at start
 	    	acceff_ = 1;
-			period_Romanova_ = period_;
 		// Phase 2: spin down due to propeller effect
 		} else if (period_ < periodrm_ && phase <= 2 && diskdensity_ > criticaldensity) {
+			phase = 2;
+			double breakupSpeed = 0.1159*pow(radius_,3./2.)*pow(mass_,-1./2.);
 			// doesn't accrete
-			//if (acceff_ = 1){
-			//	cout << (rm_/radius_)/60 << endl;
-			//	cout << periodrm_/period_ << endl;
-			//	double mu = (rm_/radius_)/60;
-			//	double omega = periodrm_/period_;
-			//	cout << 3.5*pow(10,34)*pow(mu,-2)*pow(bfield_,2)*pow(radius_/2,3)*GRAMS_TO_SOLAR_MASS*pow(CM_TO_SOLAR_RADIUS,2)*86400/SECONDS_TO_MYR << endl;
-			//}
 			acceff_ = 0;
-			//double PdotTerm1 = 2*radius_*radiusdot_*mass_*period_/(mass_*pow(radius_,2));
-			double mu = (rm_/radius_)/60;
+			//double mu = (rm_/radius_)/60;
+			double mu = (bfield_/pow(radius_,3))/(60*.035*4*16);
 			double omega = periodrm_/period_;
-			//acceff_ = 1-(0.57*pow(omega,.3));
+			if(phase==1){
+				propeller_strength = omega;	
+			}
+
+			//if (Romanova_) {
+			//	acceff_ = 1-(0.57*pow(omega,.3));
+			//}
 			double PdotTerm1 = ((massdot_*acceff_*pow(radius_,2)+2*radius_*radiusdot_*mass_)*period_)/(mass_*pow(radius_,2));
 			double R0 = 1.4*pow(10,11)*CM_TO_SOLAR_RADIUS;
-			double romanovaL = pow(mu,-2)*pow(bfield_,2)*pow(R0/CM_TO_SOLAR_RADIUS,3)*pow(radius_/R0,6)*GRAMS_TO_SOLAR_MASS*pow(CM_TO_SOLAR_RADIUS,2)*86400/SECONDS_TO_MYR;
-			//double romanovaL = 7.61*pow(10,35)*pow(mu,-2)*GRAMS_TO_SOLAR_MASS*pow(CM_TO_SOLAR_RADIUS,2)*86400/SECONDS_TO_MYR; // units of solar mass * (solar radius)^2/(days*Myr)
+			double romanovaL = 7.61*pow(10,35)*pow(5,-2)*GRAMS_TO_SOLAR_MASS*pow(CM_TO_SOLAR_RADIUS,2)*86400/SECONDS_TO_MYR;
 			//double romanovaL = 3.5*pow(10,34)*pow(mu,-2)*pow(bfield_,2)*pow(radius_/2,3)*GRAMS_TO_SOLAR_MASS*pow(CM_TO_SOLAR_RADIUS,2)*86400/SECONDS_TO_MYR;
-			double romanovaTorque = 0.51*pow(omega,.99)*romanovaL;
-			if (Romanova_) {
-				period_ += timestep_*PdotTerm1 + timestep_*romanovaTorque*pow(period_,2)/(2*3.14*SHAPEFACTOR*mass_*pow(radius_,2));
-			}
-			else{
-				period_ += timestep_*PdotTerm1 + timestep_*PROPEFF*0.972*pow(BETA,-3.)*pow(period_,2.)*pow(mass_,-4./7.)*pow(bfield_,2./7.)*pow(radius_,-8./7.)*pow(massdot_/1.e-8,6./7.);
-			}
-			//cout << "Romanava Torque:" << romanavaTorque*pow(period_,2)/(2*3.14*SHAPEFACTOR*mass_*pow(radius_,2)) << endl;
-			//period_Romanava_ += timestep_*romanavaTorque*pow(period_Romanava_,2)/(2*3.14*SHAPEFACTOR*mass_*pow(radius_,2));
-			//double ourTorque = 2*3.14*1.44385*pow(BETA,-3.)*pow(mass_,3./7.)*pow(bfield_,2./7.)*pow(radius_,6./7.)*pow(massdot_/1.e-8,6./7.);
-			//if (romanavaTorque < ourTorque) {
-			//	cout << romanavaTorque << endl;
-			//cout << "Our Torque:" << ourTorque << endl;
-			// keep track of the propeller endtime
+			//double romanovaL = 3.5*pow(10,34)*pow(mu,-2)*pow(bfield_,2)*pow(radius_/2,3)*86400*3.15*pow(10,13)/(2.0*pow(10,33)*pow(6.96*pow(10,10),2));
+			double romanovaTorque = 0.87*pow(omega,.98)*romanovaL;
+			double ourTorque = pow(2*G,3./7.)*pow(BETA,-3)*pow(bfield_*KGAUSS_TO_SOLAR,2./7.)*pow(radius_,6./7.)*pow(mass_,3./7.)*pow(massdot_*1.e6,6./7.)*DAYS_TO_MYR; // units of solar mass * (solar radius)^2/(days*Myr) -50.74*timestep_*acceff_*pow(period_,2)*massdot_*pow(mass_,-0.5)*pow(radius_,-1.5)/(2*3.1415*SHAPEFACTOR);
+			//cout << ourTorque << "  " << romanovaTorque << endl;
 			
+
+			
+			//if (Romanova_) {
+			//	period_ += period_*2*(radius_-radius)/radius_  
+			//   		+timestep_*acceff_*period_*massdot_/mass_ + timestep_*romanovaTorque*pow(period_,2)/(2*3.14*SHAPEFACTOR*mass_*pow(radius_,2));
+
+			//}
+			//else{
+			period_ += period_*2*(radius_-radius)/radius_  
+			   		+timestep_*acceff_*period_*massdot_/mass_ + timestep_*PROPEFF*ourTorque*pow(period_,2)/(2*3.14*SHAPEFACTOR*mass_*pow(radius_,2));
+			//}
 			propendtime_ = age_;			
-			phase = 2;
+			if(period_ < breakupSpeed) {
+				period_ = breakupSpeed;
+			}
 			
 		// Phase 3: disk-locked
 		} else if (diskdensity_ > criticaldensity && phase <= 3) {
-			//if (phase == 2) {
-			//	cout << age_ << endl;
-			//}
-			//cout << criticaldensity << endl;
 			// condition for turning on propellar effect is w(Rc) = Req = gamma Rcm.
 			period_ = 8.*pow(GAMMA*BETA/0.9288,3./2.)*pow(massdot_/1.0e-8,-3./7.)*pow(mass_/0.5,-5./7.)*pow(radius_/2.,18./7.)*pow(bfield_,6./7.);
 			phase = 3;
@@ -330,12 +504,6 @@ void TTauriStar::calculateperiods()
 			// double periodChange = (TIMESTEP*acceff_*period_*massdot_/mass_
 			// 	-50.74*TIMESTEP*acceff_*pow(period_,2)*massdot_*pow(mass_,-0.5)*pow(rm_,0.5)*pow(radius_,-2.))/TIMESTEP;
 
-			// period_ += period_*2*(radius_-radius)/radius_
-			//         +TIMESTEP*acceff_*period_*massdot_/mass_
-			// 	-50.74*TIMESTEP*acceff_*pow(period_,2)*massdot_*pow(mass_,-0.5)*pow(rm_,0.5)*pow(radius_,-2.);
-
-
-
 			// version where we assume accretion happens at the surface of the star
 			//    double periodChange = (TIMESTEP*acceff_*period_*massdot_/mass_
 			//    	-50.74*TIMESTEP*acceff_*pow(period_,2)*massdot_*pow(mass_,-0.5)*pow(radius_,-1.5))/TIMESTEP;
@@ -347,19 +515,6 @@ void TTauriStar::calculateperiods()
 				if(period_ < breakupPeriod){
 					period_ = breakupPeriod;
 				}
-
-				period_Romanova_ = period_;
-			// fprintf(temp, "%f %f \n", age_, periodChange);
-
-			// version where we neglect final term
-			// period_ += period_*2*(radius_-radius)/radius_
-			// 		   +TIMESTEP*acceff_*period_*massdot_/mass_;
-
-		   	// phase = 4;
-			
-			//period_ += period_*2*(radius_-radius)/radius_
-			//        +TIMESTEP*1e6*acceff_*period_*massdot_/mass_
-			//	-50.74*TIMESTEP*1e6*acceff_*pow(period_,2)*massdot_*pow(mass_,-0.5)*pow(rm_,0.5)*pow(radius_,-2.);
 			 phase = 4;
 		}
 
@@ -378,8 +533,7 @@ void TTauriStar::calculateperiods()
 		// store the period
 		periods_.push_back(period_);
 		periods_Romanova_.push_back(period_Romanova_);
-		propellerStrength_ = periodrm_/period_;
-		propellerStrengths_.push_back(propellerStrength_);
+		propellerStrengths_.push_back(periodrm_/period_);
 		massdots_.push_back(massdot_);
 		radii_.push_back(radius_);
 		rms_.push_back(rm_);
@@ -406,22 +560,24 @@ vector<double> TTauriStar::update()
 			calculatemassdot();
 			calculateradius();
 			calculatemasses();
-		  calculateperiods();
+		  	calculateperiods();
 			++numIterations;
 		}
 
+		if (valid_) {
 		if(!isnan(period_)) {
-		dataVector.push_back(period_);
-		dataVector.push_back(1.0*phase_.back());
-		return dataVector;
+			dataVector.push_back(period_);
+			dataVector.push_back(1.0*phase_.back());
+			return dataVector;
+		}
 		}
 	}
-	else {
-		cout << "Age: " << age_ << endl;
-		cout << "Star is not valid" << endl;
-		dataVector.push_back(0);
-		dataVector.push_back(0);
-	}
+	//else {
+		//cout << "Age: " << age_ << endl;
+		//cout << "Mass: " << mass_  << endl;
+		//cout << "Star is not valid" << endl;
+		cout << age_ << " " << mass0_ << " " << bfieldstrength_ << " " << massdotfactor_ << endl;
+	//}
 	return dataVector;
 }
 
@@ -597,14 +753,18 @@ void TTauriStar::plot(int m, int n)
 	//string plotName = plotNameStream.str();
 
 	// construct log-log plot for accretion rate
-	if(getname(n) == "AccretionRate1") {
-		//generate a log-log plot
-		vector<double> yVectorLog = yVector;
+	if(getname(n) == "AccretionRate") {
+		// convert to mdot per myr
+		vector<double> yVector2 = yVector;
 		//vector<double> xVectorLog = xVector;
-
 		for(size_t k=0; k<yVector.size(); k++) {
-			yVectorLog[k] = log10(yVector[k]);
-			myfile<<to_string(xVector[k])<< " " << to_string(yVectorLog[k]) << endl; //save table data to myfile
+			yVector2[k] = yVector[k]; //*pow(10,6);
+			stringstream tempStream;
+			tempStream << fixed << setprecision(12);
+			tempStream << yVector2[k]; 
+			string output = tempStream.str();
+
+			myfile<<to_string(xVector[k])<< " " << output << endl; //save table data to myfile
 		}
 		//plotNameStream << " SLOPE_" << to_string(slope(xVector, yVectorLog));
 		//plotName = plotNameStream.str();
@@ -618,7 +778,7 @@ void TTauriStar::plot(int m, int n)
 		fprintf(gp, "%s%s %s %s%s\n", "set title \"",getname(n).data(),"vs",getname(m).data(),"\"");
 
 		fprintf(gp, "%s%s %s%s%s\n", "set xlabel \"",getname(m).data(),"(",getunit(m).data(),")\"");
-		fprintf(gp, "%s%s %s%s%s\n", "set ylabel \"Ln of ",getname(n).data(),"(",getunit(n).data(),")\"");
+		fprintf(gp, "%s%s %s\n", "set ylabel \"Ln of ",getname(n).data(),"(solar mass/yr)\"");
 		fprintf(gp, "plot '%s'\n", title.c_str());
 
 	}
